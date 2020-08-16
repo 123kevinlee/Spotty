@@ -49,12 +49,7 @@ client.on("message", async message => {
         }
         return;
     } else if (message.content.startsWith(`${prefix}shuffle`)) {
-        var first = serverQueue.songs[0];
-        serverQueue.songs.shift();
-        var shuffled = shuffle(serverQueue.songs);
-        shuffled.unshift(first);
-        serverQueue.songs = shuffled;
-        message.channel.send("Queue Shuffled!");
+        queueShuffle(message, serverQueue);
     }
     else {
         message.channel.send("You need to enter a valid command!");
@@ -71,7 +66,6 @@ client.on("voiceStateUpdate", function (oldMember, newMember) {
 
 async function execute(message, serverQueue) {
     const args = message.content.split(" ");
-    //console.log(message);
 
     const voiceChannel = message.member.voice.channel;
     if (!voiceChannel)
@@ -263,6 +257,15 @@ function sendQueue(message, serverQueue) {
 
 }
 
+function queueShuffle(message, serverQueue) {
+    var first = serverQueue.songs[0];
+    serverQueue.songs.shift();
+    var shuffled = shuffle(serverQueue.songs);
+    shuffled.unshift(first);
+    serverQueue.songs = shuffled;
+    message.channel.send("Queue Shuffled!");
+}
+
 function shuffle(array) {
     //console.log(array);
     let counter = array.length;
@@ -313,6 +316,7 @@ function play(guild, song) {
 
     const dispatcher = serverQueue.connection
         .play(ytdl(song.url, {
+            type: 'opus',
             quality: 'highestaudio',
             highWaterMark: 1 << 25
         }))
@@ -321,7 +325,7 @@ function play(guild, song) {
             play(guild, serverQueue.songs[0]);
         })
         .on("error", error => console.error(error));
-    dispatcher.setVolumeLogarithmic(serverQueue.volume / 5);
+    dispatcher.setVolumeLogarithmic(serverQueue.volume / 10);
     //serverQueue.textChannel.send(`Start playing: **${song.title}**`);
 }
 
