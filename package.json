@@ -1,0 +1,20 @@
+{
+  "name": "spotty",
+  "version": "1.0.0",
+  "description": "Discord bot that plays spotify playlists using songs on youtube.",
+  "main": "bot.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Kevin Lee",
+  "license": "ISC",
+  "dependencies": {
+    "@discordjs/opus": "^0.3.2",
+    "axios": "^0.19.2",
+    "discord.js": "^12.3.1",
+    "dotenv": "^8.2.0",
+    "ffmpeg-static": "^4.2.6",
+    "spotify-web-api-node": "^4.0.0",
+    "ytdl-core": "^3.2.1"
+  }
+}
