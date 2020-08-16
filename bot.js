@@ -1,15 +1,17 @@
 const SpotifyWebApi = require('spotify-web-api-node');
 const Discord = require("discord.js");
 const ytdl = require("ytdl-core");
-const { google } = require('googleapis');
-const youtubeV3 = google.youtube({ version: 'v3', auth: 'keyhere' });
+const axios = require("axios");
+require('dotenv').config()
 
 const prefix = '+';
-const token = 'tokenhere';
+const token = process.env.discord_token;
 
 const client = new Discord.Client();
 
 const queue = new Map();
+
+var kicked = false;
 
 client.once("ready", () => {
     console.log("Ready!");
@@ -39,16 +41,31 @@ client.on("message", async message => {
         stop(message, serverQueue);
         return;
     } else if (message.content.startsWith(`${prefix}queue`)) {
-        var string = 'Queue\n';
-        var counter = 1;
-        for (var song of serverQueue.songs) {
-            string += counter + '. ' + song['title'] + '\n';
-            counter++;
+        if (serverQueue == undefined) {
+            message.channel.send("There is no queue");
         }
-        message.channel.send(string);
+        else {
+            sendQueue(message, serverQueue);
+        }
         return;
-    } else {
+    } else if (message.content.startsWith(`${prefix}shuffle`)) {
+        var first = serverQueue.songs[0];
+        serverQueue.songs.shift();
+        var shuffled = shuffle(serverQueue.songs);
+        shuffled.unshift(first);
+        serverQueue.songs = shuffled;
+        message.channel.send("Queue Shuffled!");
+    }
+    else {
         message.channel.send("You need to enter a valid command!");
+    }
+});
+
+client.on("voiceStateUpdate", function (oldMember, newMember) {
+    if (newMember['id'] == '744308100944625674' && newMember['channelID'] == null) {
+        console.log('kicked');
+        kicked = true;
+        queue.delete(oldMember['guild']['id']);
     }
 });
 
@@ -70,15 +87,17 @@ async function execute(message, serverQueue) {
 
     if (args[1].indexOf('spotify') > 0) {
         var spotifyApi = new SpotifyWebApi({
-            clientId: 'clientId',
-            clientSecret: ' clientSecret'
+            clientId: process.env.spotify_clientId,
+            clientSecret: process.env.spotify_clientSecret
         });
 
         spotifyApi.clientCredentialsGrant()
             .then(async function (data) {
                 spotifyApi.setAccessToken(data.body['access_token']);
 
-                spotifyApi.getPlaylistTracks(args[1].substring(args[1].lastIndexOf('/') + 1, args[1].indexOf('?'))).then(
+                var playlist = await getPlaylistId(args);
+
+                spotifyApi.getPlaylistTracks(playlist).then(
                     async function (data) {
                         var counter = 0;
                         for (var item of data.body['items']) {
@@ -88,6 +107,11 @@ async function execute(message, serverQueue) {
                                 artists += item['track']['artists'][j]['name'] + ' ';
                             }
                             //console.log(songName + ' ' + artists);
+                            if (kicked == true) {
+                                kicked = false;
+                                console.log("Ending searches...")
+                                break;
+                            }
                             await searchSong(songName + ' ' + artists, counter, message);
                             counter++;
                         }
@@ -138,34 +162,21 @@ async function execute(message, serverQueue) {
     }
 }
 
-function sleep(ms) {
-    return new Promise((resolve) => {
-        setTimeout(resolve, ms);
-    });
-}
-
 async function searchSong(query, counter, message) {
-    await youtubeV3.search.list({
-        part: 'snippet',
-        type: 'video',
-        q: query,
-        maxResults: 5,
-        order: 'relevance',
-        safeSearch: 'moderate',
-        videoEmbeddable: true
-    }, async (err, response) => {
-        //console.log('https://www.youtube.com/watch?v=' + response['data']['items'][0]['id']['videoId']);
-        if (counter == 0) {
-            await spotifyStart('https://www.youtube.com/watch?v=' + response['data']['items'][0]['id']['videoId'], message);
-            console.log(queue.get(message.guild.id).songs)
-            console.log('started playlist');
-        }
-        else {
-            await sleep(5000);
-            await spotifyQueue('https://www.youtube.com/watch?v=' + response['data']['items'][0]['id']['videoId'], queue.get(message.guild.id));
-            console.log('added song');
-        }
-    });
+    var data = await fetchHTML('https://www.youtube.com/results?search_query=' + query);
+    data = data.substring(data.indexOf('/watch?v='));
+    data = data.substring(0, data.indexOf('\"'));
+    //console.log('https://www.youtube.com' + data);
+    if (counter == 0) {
+        await spotifyStart('https://www.youtube.com' + data, message);
+        //console.log(queue.get(message.guild.id).songs)
+        console.log('started playlist');
+        await sleep(5000);
+    }
+    else {
+        await spotifyQueue('https://www.youtube.com' + data, queue.get(message.guild.id));
+        console.log('added song');
+    }
 }
 
 async function spotifyStart(url, message) {
@@ -206,7 +217,7 @@ async function spotifyStart(url, message) {
         var connection = await voiceChannel.join();
         queueContruct.connection = connection;
         play(message.guild, queueContruct.songs[0]);
-        serverQueue.textChannel.send(`Started Playing: **${song.title}**`);
+        queue.get(message.guild.id).textChannel.send(`Started Playing: **${song.title}**`);
     } catch (err) {
         console.log(err);
         queue.delete(message.guild.id);
@@ -222,6 +233,55 @@ async function spotifyQueue(url, serverQueue) {
     };
     serverQueue.songs.push(song);
     //serverQueue.textChannel.send(`Queued: **${song.title}**`);
+}
+
+function sendQueue(message, serverQueue) {
+    var string = '';
+    var counter = 0;
+    var max = 16;
+    if (max > serverQueue.songs.length) {
+        max = serverQueue.songs.length;
+    }
+    for (var i = 0; i < max; i++) {
+        if (counter == 0) {
+            string += '** Now Playing: ** ' + serverQueue.songs[i]['title'] + '\n';
+        }
+        else {
+            string += '**' + counter + '.** ' + serverQueue.songs[i]['title'] + '\n';
+        }
+
+        counter++;
+    }
+    string += '\n' + serverQueue.songs.length + ' total songs';
+    const embed = new Discord.MessageEmbed()
+        .setColor('#0099ff')
+        .setTitle('Spotty Music Queue (Next 15)')
+        .setDescription(string)
+        .setFooter('Spotty', 'https://media.discordapp.net/attachments/425848492489965579/744381111773298760/spotify-computer-icons-comparison-of-on-demand-music-streaming-services-streaming-media-png-simple-s.jpg?width=631&height=631');
+
+    message.channel.send(embed);
+
+}
+
+function shuffle(array) {
+    //console.log(array);
+    let counter = array.length;
+
+    // While there are elements in the array
+    while (counter > 0) {
+        // Pick a random index
+        let index = Math.floor(Math.random() * counter);
+
+        // Decrease counter by 1
+        counter--;
+
+        // And swap the last element with it
+        let temp = array[counter];
+        array[counter] = array[index];
+        array[index] = temp;
+    }
+
+    return array;
 }
 
 function skip(message, serverQueue) {
@@ -252,7 +312,10 @@ function play(guild, song) {
     }
 
     const dispatcher = serverQueue.connection
-        .play(ytdl(song.url))
+        .play(ytdl(song.url, {
+            quality: 'highestaudio',
+            highWaterMark: 1 << 25
+        }))
         .on("finish", () => {
             serverQueue.songs.shift();
             play(guild, serverQueue.songs[0]);
@@ -260,6 +323,28 @@ function play(guild, song) {
         .on("error", error => console.error(error));
     dispatcher.setVolumeLogarithmic(serverQueue.volume / 5);
     //serverQueue.textChannel.send(`Start playing: **${song.title}**`);
+}
+
+async function getPlaylistId(args) {
+    //args = args.split(" ");
+    var playlist = args[1].substring(args[1].lastIndexOf('/') + 1);
+    //console.log(playlist);
+    if (playlist.indexOf('?') > 0) {
+        playlist = playlist.substring(0, playlist.indexOf('?'));
+        //console.log(playlist);
+    }
+    return playlist;
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}
+
+async function fetchHTML(url) {
+    const { data } = await axios.get(encodeURI(url));
+    return data;
 }
 
 client.login(token);
