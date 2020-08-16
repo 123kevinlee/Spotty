@@ -34,18 +34,22 @@ client.on("message", async message => {
 
     if (message.content.startsWith(`${prefix}play`)) {
         execute(message, serverQueue);
+        purgeLast(message);
         return;
     }
     else if (message.content.startsWith(`${prefix}help`)) {
         help(message);
+        purgeLast(message);
         return;
     }
     else if (message.content.startsWith(`${prefix}skip`)) {
         skip(message, serverQueue);
+        purgeLast(message);
         return;
     }
     else if (message.content.startsWith(`${prefix}stop`)) {
         stop(message, serverQueue);
+        purgeLast(message);
         return;
     }
     else if (message.content.startsWith(`${prefix}queue`)) {
@@ -54,11 +58,13 @@ client.on("message", async message => {
         }
         else {
             sendQueue(message, serverQueue);
+            purgeLast(message);
         }
         return;
     }
     else if (message.content.startsWith(`${prefix}shuffle`)) {
         queueShuffle(message, serverQueue);
+        purgeLast(message);
     }
     else {
         message.channel.send("You need to enter a valid command!");
@@ -106,12 +112,7 @@ async function execute(message, serverQueue) {
                         spotifyApi.getPlaylist(playlist).then(
                             async function (collection) {
                                 //console.log(collection.body);
-                                const fetched = await message.channel.messages.fetch({
-                                    limit: 1,
-                                });
-                                message.channel.bulkDelete(fetched)
 
-                                    .catch(error => message.reply(`Couldn't delete messages because of: ${error}`));
                                 client.user.setActivity(collection.body['name'] + ' by ' + collection.body['owner']['display_name']);
                                 //message.channel.send('Started playing ' + collection.body['name']);
                                 const embed = new Discord.MessageEmbed()
@@ -264,29 +265,88 @@ async function spotifyQueue(url, serverQueue) {
 function sendQueue(message, serverQueue) {
     var string = '';
     var counter = 0;
-    var max = 16;
-    if (max > serverQueue.songs.length) {
-        max = serverQueue.songs.length;
-    }
-    for (var i = 0; i < max; i++) {
-        if (counter == 0) {
-            string += '** Now Playing: ** ' + serverQueue.songs[i]['title'] + '\n';
+    var pages = [];
+
+    if (serverQueue.songs.length < 11) {
+        for (var i = 0; i < serverQueue.songs.length; i++) {
+            if (counter == 0) {
+                string += '** Now Playing: ** ' + serverQueue.songs[i]['title'] + '\n';
+            }
+            else {
+                string += '**' + counter + '.** ' + serverQueue.songs[i]['title'] + '\n';
+            }
+            counter++;
         }
-        else {
-            string += '**' + counter + '.** ' + serverQueue.songs[i]['title'] + '\n';
-        }
+        const embed = new Discord.MessageEmbed()
+            .setColor('#0099ff')
+            .setTitle('Spotty Music Queue')
+            .setDescription(string)
+            .setFooter('Spotty - 123kevinlee', 'https://media.discordapp.net/attachments/425848492489965579/744381111773298760/spotify-computer-icons-comparison-of-on-demand-music-streaming-services-streaming-media-png-simple-s.jpg?width=631&height=631');
 
-        counter++;
+        message.channel.send(embed);
     }
-    string += '\n' + serverQueue.songs.length + ' total songs';
-    const embed = new Discord.MessageEmbed()
-        .setColor('#0099ff')
-        .setTitle('Spotty Music Queue (Next 15)')
-        .setDescription(string)
-        .setFooter('Spotty - 123kevinlee', 'https://media.discordapp.net/attachments/425848492489965579/744381111773298760/spotify-computer-icons-comparison-of-on-demand-music-streaming-services-streaming-media-png-simple-s.jpg?width=631&height=631');
+    else {
+        for (var i = 0; i < serverQueue.songs.length; i++) {
+            if (counter == 0) {
+                string += '** Now Playing: ** ' + serverQueue.songs[i]['title'] + '\n';
+            }
+            else {
+                string += '**' + counter + '.** ' + serverQueue.songs[i]['title'] + '\n';
+            }
 
-    message.channel.send(embed);
+            if (counter % 10 == 0 && i != 0) {
+                string += '\n' + serverQueue.songs.length + ' total songs';
+                pages.push(string);
+                string = '';
+            }
 
+            counter++;
+        }
+        string += '\n' + serverQueue.songs.length + ' total songs';
+        pages.push(string);
+
+        var page = 1;
+        const embed = new Discord.MessageEmbed()
+            .setColor('#0099ff')
+            .setTitle('Spotty Music Queue - ' + page + '/' + pages.length)
+            .setDescription(pages[page - 1])
+            .setFooter('Spotty - 123kevinlee', 'https://media.discordapp.net/attachments/425848492489965579/744381111773298760/spotify-computer-icons-comparison-of-on-demand-music-streaming-services-streaming-media-png-simple-s.jpg?width=631&height=631');
+
+        message.channel.send(embed).then(msg => {
+            msg.react('⬅️');
+            msg.react('➡️').then(r => {
+                const backwardsFilter = (reaction) => reaction.emoji.name == '⬅️';
+                const forwardsFilter = (reaction) => reaction.emoji.name == '➡️';
+
+                const backwards = msg.createReactionCollector(backwardsFilter);
+                const forwards = msg.createReactionCollector(forwardsFilter);
+
+                backwards.on('collect', r => {
+                    if (page == 1) {
+                        r.users.remove(r.users.cache.filter(u => !u.bot).first())
+                        return;
+                    }
+                    page--;
+                    embed.setDescription(pages[page - 1]);
+                    embed.setTitle('Spotty Music Queue - ' + page + '/' + pages.length);
+                    msg.edit(embed);
+                    r.users.remove(r.users.cache.filter(u => !u.bot).first())
+                });
+
+                forwards.on('collect', r => {
+                    if (pages[page] == undefined) {
+                        r.users.remove(r.users.cache.filter(u => !u.bot).first());
+                        return;
+                    }
+                    page++;
+                    embed.setDescription(pages[page - 1]);
+                    embed.setTitle('Spotty Music Queue - ' + page + '/' + pages.length);
+                    msg.edit(embed);
+                    r.users.remove(r.users.cache.filter(u => !u.bot).first());
+                });
+            });
+        });
+    }
 }
 
 function help(message) {
@@ -336,6 +396,7 @@ function skip(message, serverQueue) {
     if (!serverQueue)
         return message.channel.send("There is no song that I could skip!");
     serverQueue.connection.dispatcher.end();
+    message.channel.send("Song Skipped!");
 }
 
 function stop(message, serverQueue) {
@@ -346,6 +407,7 @@ function stop(message, serverQueue) {
     client.user.setActivity('sad songs 😭')
     serverQueue.songs = [];
     serverQueue.connection.dispatcher.end();
+    message.channel.send("Music Stopped!");
 }
 
 function play(guild, song) {
@@ -391,6 +453,15 @@ function sleep(ms) {
 async function fetchHTML(url) {
     const { data } = await axios.get(encodeURI(url));
     return data;
+}
+
+async function purgeLast(message) {
+    const fetched = await message.channel.messages.fetch({
+        limit: 1,
+    });
+    message.channel.bulkDelete(fetched)
+
+        .catch(error => message.reply(`Couldn't delete messages because of: ${error}`));
 }
 
 client.login(token);
