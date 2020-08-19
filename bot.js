@@ -152,6 +152,13 @@ async function execute(message, serverQueue) {
             });
     }
 
+    else if (args[1].indexOf('http') < 0) {
+        var query = '';
+        for (var i = 1; i < args.length; i++) {
+            query += args[i] + ' ';
+        }
+        await searchSong(query, 0, message);
+    }
     else {
         const songInfo = await ytdl.getInfo(args[1]);
         const song = {
